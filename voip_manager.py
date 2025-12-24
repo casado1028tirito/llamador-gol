@@ -321,18 +321,16 @@ class VoIPManager:
         """Notificar en background sin bloquear con formato mejorado"""
         try:
             timestamp = datetime.now().strftime("%H:%M:%S")
-            # Usar los últimos 4 dígitos del número como identificador visual
-            call_id_short = phone_number[-4:] if phone_number != 'Desconocido' else call_sid[:4]
             
             message = f"""
-┌────────────────────
+┌─────────────────────────
 │ ✅ **LLAMADA CONTESTADA**
 │
 │ 📞 Número: `{phone_number}`
-│ 🆔 ID: `...{call_id_short}`
 │ ⏰ Hora: {timestamp}
-└────────────────────
-🎧 **Conversación iniciada...**
+│ 🆔 ID: `{call_sid[:12]}`
+└─────────────────────────
+🎧 **Escuchando...**
 """
             await self.caller_bot.telegram_bot.send_message(
                 telegram_chat_id,
@@ -345,9 +343,9 @@ class VoIPManager:
         """Enviar respuesta IA a Telegram con formato mejorado"""
         try:
             timestamp = datetime.now().strftime("%H:%M:%S")
-            call_id = phone_number[-4:] if phone_number and phone_number != 'Desconocido' else "----"
+            call_id = phone_number if phone_number and phone_number != 'Desconocido' else "N/A"
             
-            message = f"🤖 **KELLY** [`...{call_id}`] [{timestamp}]\n\n{text}"
+            message = f"🤖 **KELLY** [`{call_id}`] [{timestamp}]\n\n{text}"
             await self.caller_bot.telegram_bot.send_message(
                 telegram_chat_id,
                 message
@@ -394,10 +392,9 @@ class VoIPManager:
             emoji = "🎤" if input_type == "VOZ" else "⌨️"
             timestamp = datetime.now().strftime("%H:%M:%S")
             phone_number = self.active_calls[call_sid].get('number', 'Desconocido')
-            call_id = phone_number[-4:] if phone_number != 'Desconocido' else call_sid[:4]
             
             try:
-                message = f"{emoji} **CLIENTE** [`...{call_id}`] [{timestamp}] _({input_type})_\n\n“_{speech_text}_”"
+                message = f"{emoji} **CLIENTE** [`{phone_number}`] [{timestamp}] _({input_type})_\n\n“_{speech_text}_”"
                 await self.caller_bot.telegram_bot.send_message(
                     telegram_chat_id,
                     message
@@ -474,11 +471,10 @@ class VoIPManager:
             if call_sid in self.active_calls:
                 telegram_chat_id = self.active_calls[call_sid]['telegram_chat_id']
                 phone_number = self.active_calls[call_sid].get('number', 'Desconocido')
-                call_id = phone_number[-4:] if phone_number != 'Desconocido' else call_sid[:4]
                 timestamp = datetime.now().strftime("%H:%M:%S")
                 
                 message = f"""
-⚠️ **LLAMADA FINALIZADA** [`...{call_id}`]
+⚠️ **LLAMADA FINALIZADA** [`{phone_number}`]
 📱 {phone_number}
 ⏰ {timestamp}
 ❌ Sin respuesta del cliente
@@ -508,9 +504,8 @@ class VoIPManager:
         if call_sid in self.active_calls:
             telegram_chat_id = self.active_calls[call_sid]['telegram_chat_id']
             phone_number = self.active_calls[call_sid].get('number', 'Desconocido')
-            call_id = phone_number[-4:] if phone_number != 'Desconocido' else call_sid[:4]
             
-            message = f\"🔇 [`...{call_id}`] Sin respuesta ({current_attempts}/{max_attempts})\\n🤖 Preguntando: _{question}_\"
+            message = f"🔇 [`{phone_number}`] Sin respuesta ({current_attempts}/{max_attempts})\n🤖 Preguntando: _{question}_"
             await self.caller_bot.telegram_bot.send_message(
                 telegram_chat_id,
                 message
@@ -533,16 +528,15 @@ class VoIPManager:
             
             telegram_chat_id = self.active_calls[call_sid]['telegram_chat_id']
             phone_number = self.active_calls[call_sid].get('number', 'Desconocido')
-            call_id = phone_number[-4:] if phone_number != 'Desconocido' else call_sid[:4]
             
             # Mapeo de estados a mensajes con emojis
             status_messages = {
-                'initiated': f'📞 [`...{call_id}`] Llamada iniciada',
-                'ringing': f'📱 [`...{call_id}`] Timbrando...',
-                'in-progress': f'✅ [`...{call_id}`] En curso',
-                'completed': f'🔴 [`...{call_id}`] Finalizada',
-                'failed': f'❌ [`...{call_id}`] Fallida',
-                'busy': f'📵 [`...{call_id}`] Ocupado',
+                'initiated': f'📞 [`{phone_number}`] Llamada iniciada',
+                'ringing': f'📱 [`{phone_number}`] Timbrando...',
+                'in-progress': f'✅ [`{phone_number}`] En curso',
+                'completed': f'🔴 [`{phone_number}`] Finalizada',
+                'failed': f'❌ [`{phone_number}`] Fallida',
+                'busy': f'📵 [`{phone_number}`] Ocupado',
                 'no-answer': '📭 No contestó',
                 'canceled': '🚫 Cancelada'
             }
