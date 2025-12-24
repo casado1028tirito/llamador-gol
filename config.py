@@ -39,15 +39,15 @@ class Settings(BaseSettings):
     # IA para conversación ULTRA RÁPIDA (CONFIABLE)
     ai_model: str = "gpt-4o-mini"  # Modelo más rápido
     ai_temperature: float = 0.9  # Natural y consistente
-    ai_max_tokens: int = 30  # Respuestas ultra rápidas 8-15 palabras
-    ai_timeout: float = 2.5  # Timeout más generoso para confiabilidad
+    ai_max_tokens: int = 35  # Respuestas completas pero ágiles 10-18 palabras
+    ai_timeout: float = 1.5  # Timeout reducido para respuestas instantáneas
     
-    # Llamadas optimizadas - VELOCIDAD + ESCUCHA PERFECTA
-    gather_timeout: int = 3  # 3 segundos - balance perfecto
-    speech_timeout: str = "auto"  # auto = detección inteligente
-    max_speech_time: int = 40  # 40 segundos por turno
+    # Llamadas optimizadas - ESCUCHA PERFECTA + VELOCIDAD
+    gather_timeout: int = 2  # 2 segundos - más ágil para empezar
+    speech_timeout: str = "auto"  # auto - detección inteligente cuando termina
+    max_speech_time: int = 50  # 50 segundos - capturar respuestas largas completas
     max_concurrent_calls: int = 50  # Soportar más llamadas
-    no_speech_attempts: int = 5  # 5 intentos antes de colgar
+    no_speech_attempts: int = 3  # 3 intentos antes de colgar (más rápido)
     profanity_filter: bool = False
     
     # Reconocimiento de voz optimizado para COLOMBIA

@@ -39,7 +39,7 @@ class VoiceSynthesizer:
             try:
                 logger.info(f"🎤 Generando audio (intento {attempt + 1}/3): '{text[:40]}...'")
                 
-                # Ejecutar en thread separado para no bloquear
+                # Ejecutar en thread separado para no bloquear - ULTRA RÁPIDO
                 loop = asyncio.get_event_loop()
                 audio = await asyncio.wait_for(
                     loop.run_in_executor(
@@ -48,10 +48,10 @@ class VoiceSynthesizer:
                             generate,
                             text=text,
                             voice=Voice(voice_id=self.voice_id, settings=self._settings),
-                            model="eleven_turbo_v2_5"
+                            model="eleven_turbo_v2_5"  # Modelo más rápido
                         )
                     ),
-                    timeout=8.0  # Timeout de 8 segundos
+                    timeout=5.0  # Timeout reducido a 5 segundos para velocidad
                 )
                 
                 # Convertir a bytes
