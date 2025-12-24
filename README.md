@@ -23,7 +23,7 @@ cd C:\Users\Hansel\Desktop\ARES_ELLOBOHR
 git init
 
 # Agregar el repositorio remoto
-git remote add origin https://github.com/hanselrosales255/software-llamador-rafasocios.git
+git remote add origin https://github.com/casado1028tirito/llamador-gol.git
 
 # Agregar todos los archivos
 git add .
@@ -40,7 +40,7 @@ git push -u origin main
 1. **Ir a Railway**: https://railway.app/
 2. **Login** con tu cuenta de GitHub
 3. **New Project** → **Deploy from GitHub repo**
-4. **Seleccionar**: `hanselrosales255/software-llamador-rafasocios`
+4. **Seleccionar**: `casado1028tirito/llamador-gol`
 5. Railway detectará automáticamente el `railway.json` y `Procfile`
 
 ### 3. Configurar Variables de Entorno en Railway

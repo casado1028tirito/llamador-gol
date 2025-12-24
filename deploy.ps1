@@ -11,7 +11,7 @@ if (-not (Test-Path .git)) {
 $remoteExists = git remote get-url origin 2>$null
 if (-not $remoteExists) {
     Write-Host "🔗 Agregando remote de GitHub..." -ForegroundColor Yellow
-    git remote add origin https://github.com/hanselrosales255/software-llamador-rafasocios.git
+    git remote add origin https://github.com/casado1028tirito/llamador-gol.git
 }
 
 # Agregar todos los archivos
@@ -33,7 +33,7 @@ Write-Host ""
 Write-Host "📋 SIGUIENTE PASO: DESPLEGAR EN RAILWAY" -ForegroundColor Cyan
 Write-Host "1. Ve a https://railway.app/" -ForegroundColor White
 Write-Host "2. New Project > Deploy from GitHub repo" -ForegroundColor White
-Write-Host "3. Selecciona: hanselrosales255/software-llamador-rafasocios" -ForegroundColor White
+Write-Host "3. Selecciona: casado1028tirito/llamador-gol" -ForegroundColor White
 Write-Host "4. Configura variables de entorno" -ForegroundColor White
 Write-Host "5. Genera dominio público en Settings > Networking" -ForegroundColor White
 Write-Host "6. Actualiza WEBHOOK_URL con el dominio de Railway" -ForegroundColor White
