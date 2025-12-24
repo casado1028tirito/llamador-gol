@@ -173,7 +173,7 @@ class VoIPManager:
     
     async def handle_incoming_call(self, call_sid: str) -> str:
         """
-        Manejar llamada entrante con ElevenLabs - OPTIMIZADO
+        Manejar llamada entrante con ElevenLabs - OPTIMIZADO Y ROBUSTO
         
         Args:
             call_sid: ID de la llamada
@@ -182,11 +182,11 @@ class VoIPManager:
             TwiML XML con audio de ElevenLabs
         """
         try:
-            logger.info(f"📞 Llamada entrante: {call_sid}")
+            logger.info(f"📞 PROCESANDO LLAMADA ENTRANTE: {call_sid}")
             
             # Registrar llamada si no existe
             if call_sid not in self.active_calls:
-                logger.warning(f"⚠️ Llamada {call_sid[:8]} no registrada, creando entrada...")
+                logger.warning(f"⚠️ Llamada {call_sid[:8]} no registrada previamente, auto-registrando...")
                 self.active_calls[call_sid] = {
                     'sid': call_sid,
                     'number': 'Desconocido',
@@ -205,19 +205,27 @@ class VoIPManager:
                 if telegram_chat_id:
                     asyncio.create_task(self._notify_call_answered(telegram_chat_id, phone_number, call_sid))
             
-            # Generar saludo inicial con timeout
-            logger.info("🤖 Generando saludo inicial...")
-            try:
-                initial_message = await asyncio.wait_for(
-                    self.caller_bot.ai_conversation.get_initial_greeting(),
-                    timeout=3.0
-                )
-                logger.info(f"💬 Saludo generado: {initial_message}")
-            except asyncio.TimeoutError:
-                logger.error("⏱️ Timeout generando saludo, usando fallback")
-                initial_message = "Hola buenos días. ¿Me escuchas bien?"
+            # VALIDAR que AI esté disponible
+            if not self.caller_bot or not hasattr(self.caller_bot, 'ai_conversation'):
+                logger.error("🚨 AI no disponible - usando mensaje predefinido")
+                initial_message = "Hola buenos días, te hablo de Bancolombia. ¿Me escuchas bien?"
+            else:
+                # Generar saludo inicial con timeout
+                logger.info("🤖 Generando saludo inicial con AI...")
+                try:
+                    initial_message = await asyncio.wait_for(
+                        self.caller_bot.ai_conversation.get_initial_greeting(),
+                        timeout=3.0
+                    )
+                    logger.info(f"💬 Saludo AI generado: '{initial_message[:60]}...'")
+                except asyncio.TimeoutError:
+                    logger.warning("⏱️ Timeout generando saludo AI - usando fallback")
+                    initial_message = "Hola buenos días, te hablo de Bancolombia. ¿Me escuchas bien?"
+                except Exception as ai_error:
+                    logger.error(f"❌ Error AI: {ai_error} - usando fallback")
+                    initial_message = "Hola buenos días, te hablo de Bancolombia. ¿Me escuchas bien?"
             
-            # Registrar
+            # Registrar en transcript
             if call_sid in self.active_calls:
                 self.active_calls[call_sid]['transcript'].append({
                     'speaker': 'ai',
@@ -226,13 +234,16 @@ class VoIPManager:
                 })
             
             # Generar audio con ElevenLabs
-            logger.info("🎵 Sintetizando audio...")
-            return await self.generate_elevenlabs_twiml(initial_message, call_sid)
+            logger.info(f"🎵 Sintetizando audio con ElevenLabs para: '{initial_message[:50]}...'")
+            twiml = await self.generate_elevenlabs_twiml(initial_message, call_sid)
+            logger.info(f"✅ TwiML generado exitosamente ({len(twiml)} chars)")
+            return twiml
             
         except Exception as e:
-            logger.error(f"❌ Error: {e}", exc_info=True)
-            # Fallback a Say si falla ElevenLabs
-            return self._generate_say_twiml("Buenas, ¿cómo estás?")
+            logger.error(f"🚨 ERROR CRÍTICO en handle_incoming_call: {e}", exc_info=True)
+            # Fallback robusto con Say
+            logger.warning("🔄 Usando fallback con Polly.Mia")
+            return self._generate_say_twiml("Hola buenos días. ¿Me escuchas bien?")
     
     async def generate_elevenlabs_twiml(self, text: str, call_sid: str) -> str:
         """

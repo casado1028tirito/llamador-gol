@@ -74,12 +74,19 @@ class CallerBot:
 
 
 async def main():
+    """Inicializar y ejecutar el bot con validaciones completas"""
+    logger.info("🚀 INICIANDO SISTEMA COMPLETO...")
+    logger.info(f"📍 Webhook URL: {settings.webhook_url}")
+    logger.info(f"🎙️ Voice ID: {settings.voice_bot}")
+    
     bot = CallerBot()
     try:
+        logger.info("🔧 Iniciando componentes...")
         await bot.start()
         
         # Mantener el bot corriendo
-        logger.info("✅ Sistema activo. Presiona Ctrl+C para detener.")
+        logger.info("✅ SISTEMA ACTIVO Y LISTO. Presiona Ctrl+C para detener.")
+        logger.info("📞 Esperando llamadas entrantes...")
         
         # Esperar indefinidamente
         import signal

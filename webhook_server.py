@@ -68,34 +68,74 @@ async def test_endpoint():
 @app.post("/voice/incoming")
 async def handle_incoming_call(request: Request):
     """
-    Webhook para llamadas entrantes - RESPUESTA INSTANTÁNEA
+    Webhook para llamadas entrantes - RESPUESTA INSTANTÁNEA Y ROBUSTA
     """
     try:
+        # Obtener datos del formulario
         form_data = await request.form()
         call_sid = form_data.get('CallSid')
+        from_number = form_data.get('From', 'Unknown')
+        to_number = form_data.get('To', 'Unknown')
         
-        logger.info(f"📞 Incoming: {call_sid}")
+        logger.info(f"📞 INCOMING CALL - SID: {call_sid} | FROM: {from_number} | TO: {to_number}")
         
-        if not caller_bot or not call_sid:
-            logger.error("❌ No caller_bot o call_sid")
-            # Colgar sin Polly
-            return Response(
-                content="<Response><Hangup/></Response>", 
-                media_type="application/xml"
+        # VALIDACIÓN CRÍTICA: ¿Está inicializado el bot?
+        if not caller_bot:
+            logger.error("🚨 CRÍTICO: caller_bot NO INICIALIZADO")
+            # Respuesta de emergencia - informar y colgar
+            response = VoiceResponse()
+            response.say("Lo sentimos, el sistema no está listo. Por favor intente más tarde.", 
+                        language='es', voice='Polly.Mia')
+            response.hangup()
+            return Response(content=str(response), media_type="application/xml")
+        
+        if not call_sid:
+            logger.error("🚨 CRÍTICO: No se recibió CallSid")
+            response = VoiceResponse()
+            response.hangup()
+            return Response(content=str(response), media_type="application/xml")
+        
+        # VALIDAR que voip_manager esté listo
+        if not hasattr(caller_bot, 'voip_manager') or not caller_bot.voip_manager:
+            logger.error("🚨 CRÍTICO: voip_manager NO INICIALIZADO")
+            response = VoiceResponse()
+            response.say("Sistema no disponible. Intentar después.", language='es', voice='Polly.Mia')
+            response.hangup()
+            return Response(content=str(response), media_type="application/xml")
+        
+        # PROCESAR LLAMADA - con timeout de 5 segundos
+        logger.info(f"✅ Procesando llamada {call_sid[:8]}...")
+        try:
+            twiml = await asyncio.wait_for(
+                caller_bot.voip_manager.handle_incoming_call(call_sid),
+                timeout=5.0
             )
-        
-        # RESPUESTA INSTANTÁNEA
-        twiml = await caller_bot.voip_manager.handle_incoming_call(call_sid)
-        logger.info(f"✅ TwiML: {len(twiml)} chars")
-        return Response(content=twiml, media_type="application/xml")
+            logger.info(f"✅ TwiML generado: {len(twiml)} caracteres")
+            return Response(content=twiml, media_type="application/xml")
+        except asyncio.TimeoutError:
+            logger.error(f"⏱️ TIMEOUT procesando {call_sid[:8]} - usando fallback")
+            # Fallback: saludo simple y gather
+            response = VoiceResponse()
+            gather = Gather(
+                input='speech dtmf',
+                language='es-CO',
+                timeout=3,
+                speechTimeout='auto',
+                action='/voice/process_speech',
+                method='POST'
+            )
+            gather.say("Hola, buenas. ¿Me escuchas bien?", language='es', voice='Polly.Mia')
+            response.append(gather)
+            response.redirect('/voice/process_speech')
+            return Response(content=str(response), media_type="application/xml")
             
     except Exception as e:
-        logger.error(f"❌ Error webhook: {e}", exc_info=True)
-        # Colgar sin Polly
-        return Response(
-            content="<Response><Hangup/></Response>", 
-            media_type="application/xml"
-        )
+        logger.error(f"🚨 ERROR CRÍTICO webhook: {e}", exc_info=True)
+        # NUNCA devolver error sin TwiML válido
+        response = VoiceResponse()
+        response.say("Ha ocurrido un error. Disculpa las molestias.", language='es', voice='Polly.Mia')
+        response.hangup()
+        return Response(content=str(response), media_type="application/xml")
 
 
 @app.post("/voice/process_speech")
