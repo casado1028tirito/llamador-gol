@@ -3,6 +3,7 @@ from fastapi.responses import Response, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from typing import Optional
+from twilio.twiml.voice_response import VoiceResponse, Gather
 import uvicorn
 import asyncio
 import os
@@ -83,16 +84,24 @@ async def handle_incoming_call(request: Request):
         # VALIDACIÓN CRÍTICA: ¿Está inicializado el bot?
         if not caller_bot:
             logger.error("🚨 CRÍTICO: caller_bot NO INICIALIZADO")
-            # Respuesta de emergencia - informar y colgar
+            # Respuesta de emergencia en ESPAÑOL - informar y colgar
             response = VoiceResponse()
-            response.say("Lo sentimos, el sistema no está listo. Por favor intente más tarde.", 
-                        language='es', voice='Polly.Mia')
+            response.say(
+                "Disculpa, el sistema no está disponible en este momento. Por favor intenta más tarde. Hasta luego.", 
+                language='es-CO',
+                voice='Polly.Mia'
+            )
             response.hangup()
             return Response(content=str(response), media_type="application/xml")
         
         if not call_sid:
             logger.error("🚨 CRÍTICO: No se recibió CallSid")
             response = VoiceResponse()
+            response.say(
+                "Ha ocurrido un error técnico. Por favor intenta nuevamente. Hasta luego.",
+                language='es-CO',
+                voice='Polly.Mia'
+            )
             response.hangup()
             return Response(content=str(response), media_type="application/xml")
         
@@ -100,7 +109,11 @@ async def handle_incoming_call(request: Request):
         if not hasattr(caller_bot, 'voip_manager') or not caller_bot.voip_manager:
             logger.error("🚨 CRÍTICO: voip_manager NO INICIALIZADO")
             response = VoiceResponse()
-            response.say("Sistema no disponible. Intentar después.", language='es', voice='Polly.Mia')
+            response.say(
+                "El sistema no está disponible. Por favor intenta después. Hasta luego.",
+                language='es-CO',
+                voice='Polly.Mia'
+            )
             response.hangup()
             return Response(content=str(response), media_type="application/xml")
         
@@ -114,8 +127,8 @@ async def handle_incoming_call(request: Request):
             logger.info(f"✅ TwiML generado: {len(twiml)} caracteres")
             return Response(content=twiml, media_type="application/xml")
         except asyncio.TimeoutError:
-            logger.error(f"⏱️ TIMEOUT procesando {call_sid[:8]} - usando fallback")
-            # Fallback: saludo simple y gather
+            logger.error(f"⏱️ TIMEOUT procesando {call_sid[:8]} - usando fallback en español")
+            # Fallback: saludo simple en ESPAÑOL y gather
             response = VoiceResponse()
             gather = Gather(
                 input='speech dtmf',
@@ -123,18 +136,23 @@ async def handle_incoming_call(request: Request):
                 timeout=3,
                 speechTimeout='auto',
                 action='/voice/process_speech',
-                method='POST'
+                method='POST',
+                hints='sí, no, claro, bueno, listo, hola, aló'
             )
-            gather.say("Hola, buenas. ¿Me escuchas bien?", language='es', voice='Polly.Mia')
+            gather.say("Hola buenas. ¿Me escuchas bien?", language='es-CO', voice='Polly.Mia')
             response.append(gather)
             response.redirect('/voice/process_speech')
             return Response(content=str(response), media_type="application/xml")
             
     except Exception as e:
         logger.error(f"🚨 ERROR CRÍTICO webhook: {e}", exc_info=True)
-        # NUNCA devolver error sin TwiML válido
+        # NUNCA devolver error sin TwiML válido - SIEMPRE EN ESPAÑOL
         response = VoiceResponse()
-        response.say("Ha ocurrido un error. Disculpa las molestias.", language='es', voice='Polly.Mia')
+        response.say(
+            "Ha ocurrido un error. Disculpa las molestias. Intenta más tarde. Hasta luego.",
+            language='es-CO',
+            voice='Polly.Mia'
+        )
         response.hangup()
         return Response(content=str(response), media_type="application/xml")
 
@@ -164,18 +182,28 @@ async def process_speech(
             logger.info(f"🎤 Voz recibida - Call: {CallSid}, Text: {SpeechResult}")
         
         if not CallSid:
-            return Response(
-                content="<Response><Hangup/></Response>",
-                media_type="application/xml"
+            logger.error("🚨 Sin CallSid en process_speech")
+            response = VoiceResponse()
+            response.say(
+                "Error procesando tu respuesta. Hasta luego.",
+                language='es-CO',
+                voice='Polly.Mia'
             )
+            response.hangup()
+            return Response(content=str(response), media_type="application/xml")
         
         # Si no hay entrada, preguntar de nuevo
         if not user_input or user_input.strip() == "":
             logger.warning(f"⚠️ Sin entrada para {CallSid}")
-            if caller_bot:
-                return Response(
-                    content=await caller_bot.voip_manager.generate_followup_question(CallSid),
-                    media_type="application/xml"
+            # Si no hay bot, colgar en español
+            response = VoiceResponse()
+            response.say(
+                "No recibimos tu respuesta. Hasta luego.",
+                language='es-CO',
+                voice='Polly.Mia'
+            )
+            response.hangup()
+            return Response(content=str(response), media_type="application/xml"        media_type="application/xml"
                 )
             return Response(
                 content="<Response><Hangup/></Response>",
@@ -186,15 +214,27 @@ async def process_speech(
             # Procesar entrada (voz o DTMF)
             twiml = await caller_bot.voip_manager.handle_speech_input(
                 CallSid, 
-                user_input,
-                input_type
+            # Sin bot, colgar en español
+            response = VoiceResponse()
+            response.say(
+                "Sistema no disponible. Hasta luego.",
+                language='es-CO',
+                voice='Polly.Mia'
             )
-            return Response(content=twiml, media_type="application/xml")
-        else:
-            return Response(content="<Response><Hangup/></Response>", 
-                          media_type="application/xml")
+            response.hangup()
+            return Response(content=str(response), media_type="application/xml")
             
     except Exception as e:
+        logger.error(f"Error procesando entrada: {e}", exc_info=True)
+        # Error con mensaje en español
+        response = VoiceResponse()
+        response.say(
+            "Ha ocurrido un error procesando tu respuesta. Disculpa. Hasta luego.",
+            language='es-CO',
+            voice='Polly.Mia'
+        )
+        response.hangup()
+        return Response(content=str(response), media_type="application/xml"pt Exception as e:
         logger.error(f"Error procesando entrada: {e}")
         return Response(
             content="<Response><Hangup/></Response>",

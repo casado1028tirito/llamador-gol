@@ -51,7 +51,7 @@ class TelegramBot:
 /llamar +57312... - Hacer llamada
 /masivo +num1 +num2 - Llamadas múltiples
 /activas - Ver llamadas activas
-/colgar - Colgar todas
+/colgar - Colgar tcodas
 
 📝 **PERSONALIZAR IA:**
 /instruccion <texto> - Cambiar comportamiento

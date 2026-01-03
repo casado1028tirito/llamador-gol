@@ -620,27 +620,32 @@ class VoIPManager:
     
     def _generate_error_twiml(self) -> str:
         """
-        Error crítico - colgar llamada sin Polly
+        Error crítico - Mensaje en ESPAÑOL antes de colgar
         
         Returns:
-            TwiML de error que cuelga directamente
+            TwiML de error en español que informa antes de colgar
         """
-        logger.error("🚨 ERROR CRÍTICO - Colgando llamada (SIN Polly)")
+        logger.error("🚨 ERROR CRÍTICO - Mensaje en español y colgando")
         response = VoiceResponse()
+        response.say(
+            "Disculpa, estamos presentando inconvenientes técnicos. Por favor intenta más tarde. Hasta luego.",
+            language='es-CO',
+            voice='Polly.Mia'
+        )
         response.hangup()
         return str(response)
     
     def _generate_say_twiml(self, message: str) -> str:
         """
-        Generar TwiML con Say como fallback de emergencia
+        Generar TwiML con Say como fallback de emergencia - SIEMPRE EN ESPAÑOL
         
         Args:
             message: Mensaje a decir
         
         Returns:
-            TwiML XML con Say
+            TwiML XML con Say en español colombiano
         """
-        logger.warning(f"⚠️ Usando Say fallback: {message}")
+        logger.warning(f"⚠️ Usando Say fallback en español: {message}")
         response = VoiceResponse()
         gather = Gather(
             input='speech dtmf',
@@ -648,9 +653,10 @@ class VoIPManager:
             timeout=3,
             speech_timeout='auto',
             action='/voice/process_speech',
-            method='POST'
+            method='POST',
+            hints='sí, no, claro, bueno, listo, perfecto, hola, aló'
         )
-        gather.say(message, voice='Polly.Mia', language='es-ES')
+        gather.say(message, voice='Polly.Mia', language='es-CO')
         response.append(gather)
         response.redirect('/voice/process_speech')
         return str(response)
