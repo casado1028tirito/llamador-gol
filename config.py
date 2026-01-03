@@ -31,16 +31,16 @@ class Settings(BaseSettings):
     # 4. Pégalo arriba en voice_bot y default_voice_id
     
     # SETTINGS LLAMADOR EL LOBO HR - VOZ PERFECTA Y NATURAL
-    voice_stability: float = 0.75  # Estabilidad óptima para naturalidad
-    voice_similarity: float = 0.90  # Alta similitud con voz original
-    voice_style: float = 0.70      # Expresiva y profesional
+    voice_stability: float = 0.50  # Más naturalidad y variación
+    voice_similarity: float = 0.85  # Balance perfecto con voz original
+    voice_style: float = 0.60      # Muy expresiva y conversacional
     voice_speaker_boost: bool = True  # Claridad perfecta en llamadas
     
     # IA para conversación PROFESIONAL Y NATURAL
     ai_model: str = "gpt-4o-mini"  # Modelo más rápido
     ai_temperature: float = 0.85  # Profesional y natural
-    ai_max_tokens: int = 30  # Respuestas ultra rápidas 8-15 palabras
-    ai_timeout: float = 1.5  # Timeout optimizado para confiabilidad
+    ai_max_tokens: int = 60  # Respuestas completas sin cortar (15-25 palabras)
+    ai_timeout: float = 2.0  # Timeout optimizado para respuestas completas
     
     # Llamadas optimizadas - ESCUCHA PERFECTA Y RESPUESTA INMEDIATA
     gather_timeout: int = 5  # 5 segundos - tiempo para que empiece a hablar
