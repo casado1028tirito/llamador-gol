@@ -78,8 +78,8 @@ Eres CONVERSACIONAL, no un robot. Fluyes naturalmente como asesora experta."""
                         {"role": "user", "content": "Acabas de MARCAR la llamada y la persona CONTESTA. Tú hablas PRIMERO. Di: saludo + de dónde llamas + motivo. Natural. 10-20 palabras."}
                     ],
                     temperature=0.85,
-                    max_tokens=40,
-                    timeout=2.0
+                    max_tokens=60,
+                    timeout=1.5
                 )
                 greeting = response.choices[0].message.content.strip()
                 greeting = greeting.replace('*', '').replace('_', '').replace('"', '').strip()
@@ -108,7 +108,7 @@ Eres CONVERSACIONAL, no un robot. Fluyes naturalmente como asesora experta."""
                 model=settings.ai_model,
                 messages=messages,
                 temperature=settings.ai_temperature,
-                max_tokens=35,  # Respuestas completas: 10-18 palabras
+                max_tokens=settings.ai_max_tokens,  # Respuestas completas sin cortar
                 timeout=settings.ai_timeout,  # Timeout optimizado desde config
                 presence_penalty=0.7,  # Fomenta variedad y evita repeticiones
                 frequency_penalty=0.8  # Penaliza fuertemente frases repetidas

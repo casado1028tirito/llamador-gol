@@ -48,7 +48,7 @@ class VoiceSynthesizer:
                             model="eleven_turbo_v2_5"
                         )
                     ),
-                    timeout=6.0  # Timeout de 6 segundos para mayor confiabilidad
+                    timeout=4.5  # Timeout optimizado para velocidad
                 )
                 
                 # Convertir a bytes
@@ -70,12 +70,12 @@ class VoiceSynthesizer:
             except asyncio.TimeoutError:
                 logger.error(f"⏱️ Timeout en intento {attempt + 1}/3")
                 if attempt < 2:
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.1)
                     continue
                 raise Exception("ElevenLabs timeout después de 3 intentos")
             except Exception as e:
                 logger.error(f"❌ Error en intento {attempt + 1}/3: {e}")
                 if attempt < 2:
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.1)
                     continue
                 raise
