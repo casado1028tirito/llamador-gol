@@ -68,7 +68,12 @@ Eres CONVERSACIONAL, no un robot. Fluyes naturalmente como asesora experta."""
         """
         La IA INICIA la llamada hablando PRIMERO según la instrucción
         """
+        logger.info("🔑 Generando saludo inicial...")
+        logger.info(f"📝 ¿Hay instrucción personalizada? {bool(self.custom_instruction)}")
+        
         if self.custom_instruction:
+            logger.info(f"🎯 Usando instrucción personalizada (length: {len(self.custom_instruction)})")
+            logger.info(f"📝 Primeras 150 chars: {self.custom_instruction[:150]}...")
             try:
                 # Prompt específico para que la IA inicie la llamada
                 response = await self.client.chat.completions.create(
@@ -83,10 +88,12 @@ Eres CONVERSACIONAL, no un robot. Fluyes naturalmente como asesora experta."""
                 )
                 greeting = response.choices[0].message.content.strip()
                 greeting = greeting.replace('*', '').replace('_', '').replace('"', '').strip()
-                logger.info(f"💬 IA inicia: {greeting}")
+                logger.info(f"✅ IA inicia: {greeting}")
                 return greeting
             except Exception as e:
-                logger.error(f"Error generando saludo: {e}")
+                logger.error(f"❌ Error generando saludo: {e}")
+        else:
+            logger.warning("⚠️ NO hay instrucción personalizada - usando saludo genérico")
         
         # Si no hay instrucción, saludo genérico profesional
         return "Hola buenos días, te hablamos de servicio al cliente. ¿Me escuchas bien?"
@@ -135,7 +142,15 @@ Eres CONVERSACIONAL, no un robot. Fluyes naturalmente como asesora experta."""
     def set_custom_prompt(self, prompt: str):
         """Personalizar comportamiento de IA"""
         self.custom_instruction = prompt
-        logger.info(f"✅ Instrucción personalizada configurada: {prompt[:50]}...")
+        logger.info(f"✅ Instrucción personalizada configurada")
+        logger.info(f"📊 Length: {len(prompt)} caracteres")
+        logger.info(f"📋 Preview: {prompt[:100]}...")
+        
+        # Verificación de que se guardó
+        if self.custom_instruction == prompt:
+            logger.info(f"✅ VERIFICADO: Prompt guardado correctamente en memoria")
+        else:
+            logger.error(f"❌ ERROR: Prompt NO se guardó correctamente!")
     
     def clear_conversation(self, call_sid: str):
         """Limpiar conversación"""

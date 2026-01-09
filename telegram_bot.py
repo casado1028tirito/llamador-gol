@@ -83,7 +83,28 @@ class TelegramBot:
             await update.message.reply_text("❌ El número debe incluir el código de país con '+'\nEjemplo: +34612345678")
             return
         
-        await update.message.reply_text(f"📞 Iniciando llamada a {phone_number}...")
+        # Mostrar flujo activo si hay uno configurado
+        chat_id = update.effective_chat.id
+        flow_info = ""
+        if chat_id in self.current_flow:
+            flow_name = self.current_flow[chat_id]
+            flow = CallFlows.get_flow(flow_name)
+            if flow:
+                flow_info = f"\n🏦 Flujo: {flow['icon']} {flow['name']}"
+                logger.info(f"📞 Llamando con flujo {flow['name']} activo")
+        else:
+            logger.warning("⚠️ No hay flujo configurado para este chat")
+            await update.message.reply_text(
+                "⚠️ **NO HAY FLUJO CONFIGURADO**\n\n"
+                "Por favor selecciona un flujo antes de llamar:\n"
+                "1️⃣ Usa /flujos\n"
+                "2️⃣ Selecciona el banco\n"
+                "3️⃣ Luego usa /llamar +numero",
+                parse_mode='Markdown'
+            )
+            return
+        
+        await update.message.reply_text(f"📞 Iniciando llamada a {phone_number}{flow_info}...")
         
         try:
             call_sid = await self.caller_bot.voip_manager.make_call(
@@ -340,24 +361,40 @@ Selecciona el flujo que deseas usar para las llamadas:
             flow = CallFlows.get_flow(flow_name)
             if not flow:
                 await query.edit_message_text("❌ Flujo no encontrado")
+                logger.error(f"❌ Flujo '{flow_name}' no existe en CallFlows.FLOWS")
                 return
             
             # Guardar flujo activo para este chat
             self.current_flow[chat_id] = flow_name
+            logger.info(f"🎯 Chat {chat_id} seleccionó flujo: {flow_name}")
             
-            # Configurar prompt de IA
+            # Configurar prompt de IA con logging detallado
+            logger.info(f"🤖 Configurando IA con prompt de {flow['name']}...")
+            logger.info(f"📝 Prompt length: {len(flow['prompt'])} caracteres")
+            logger.info(f"📝 Primeras 100 chars: {flow['prompt'][:100]}...")
+            
             self.caller_bot.ai_conversation.set_custom_prompt(flow["prompt"])
             
+            # Verificar que se guardó correctamente
+            saved_prompt = self.caller_bot.ai_conversation.custom_instruction
+            if saved_prompt == flow["prompt"]:
+                logger.info(f"✅ Prompt guardado correctamente en AI conversation")
+            else:
+                logger.error(f"⚠️ Prompt NO se guardó correctamente!")
+            
             await query.edit_message_text(
-                f"✅ **Flujo Activado**\n\n"
+                f"✅ **🎯 FLUJO ACTIVADO: {flow['name'].upper()}**\n\n"
                 f"{flow['icon']} **{flow['name']}**\n"
                 f"{flow['description']}\n\n"
-                f"💡 Ahora puedes hacer llamadas con /llamar o /masivo\n"
-                f"La IA seguirá automáticamente el flujo de {flow['name']}",
+                f"🔑 **El flujo está LISTO para usar**\n\n"
+                f"📢 Siguiente paso:\n"
+                f"• /llamar +numero - para una llamada\n"
+                f"• /masivo +num1 +num2 - para varias llamadas\n\n"
+                f"🤖 La IA seguirá EXACTAMENTE el flujo de {flow['name']}",
                 parse_mode='Markdown'
             )
             
-            logger.info(f"Flujo {flow_name} activado para chat {chat_id}")
+            logger.info(f"✅ Flujo {flow_name} ({flow['name']}) ACTIVADO completamente para chat {chat_id}")
             return
         
         if query.data.startswith("hangup_"):
