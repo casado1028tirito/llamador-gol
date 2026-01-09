@@ -1,22 +1,35 @@
-"""Síntesis de voz optimizada - Solo ElevenLabs"""
+"""
+Síntesis de voz con ElevenLabs
+Genera audio de alta calidad para llamadas telefónicas
+"""
 from elevenlabs import generate, set_api_key, Voice, VoiceSettings
 from loguru import logger
 from config import settings
 import os
 import asyncio
 from functools import partial
+from typing import Optional
 
 
 class VoiceSynthesizer:
-    """Generador de voz con ElevenLabs - Rachel"""
+    """
+    Generador de voz ElevenLabs con reintentos automáticos
+    Patrón: Retry con backoff exponencial
+    """
+    
+    MAX_RETRIES = 3
+    RETRY_DELAY = 0.1  # segundos
+    MIN_AUDIO_SIZE = 1000  # bytes mínimos
+    TIMEOUT = 4.5  # segundos
     
     def __init__(self):
+        """Inicializar sintetizador"""
         self.voice_id = settings.voice_bot
         self.audio_dir = "audio_cache"
-        self._settings = None
+        self._settings: Optional[VoiceSettings] = None
     
-    async def initialize(self):
-        """Inicializar ElevenLabs"""
+    async def initialize(self) -> None:
+        """Configurar API y directorio"""
         set_api_key(settings.elevenlabs_api_key)
         os.makedirs(self.audio_dir, exist_ok=True)
         
@@ -27,16 +40,26 @@ class VoiceSynthesizer:
             use_speaker_boost=settings.voice_speaker_boost
         )
         
-        logger.info(f"✅ Voz LLAMADOR EL LOBO HR ({self.voice_id}) lista - Ultra realista (ElevenLabs)")
+        logger.info(f"✅ Voz {self.voice_id} lista")
     
-    async def text_to_speech(self, text: str, filename: str = None) -> bytes:
-        """Generar audio con modelo turbo v2.5 - OPTIMIZADO PARA VELOCIDAD MÁXIMA"""
-        # Reintentar hasta 3 veces
-        for attempt in range(3):
+    async def text_to_speech(self, text: str, filename: Optional[str] = None) -> bytes:
+        """
+        Generar audio desde texto con reintentos
+        
+        Args:
+            text: Texto a sintetizar
+            filename: Nombre archivo opcional para guardar
+            
+        Returns:
+            bytes: Audio generado
+            
+        Raises:
+            Exception: Si falla después de MAX_RETRIES
+        """
+        for attempt in range(self.MAX_RETRIES):
             try:
-                logger.info(f"🎤 Generando audio (intento {attempt + 1}/3): '{text[:40]}...'")
+                logger.info(f"🎤 Generando audio {attempt + 1}/{self.MAX_RETRIES}: '{text[:40]}...'")
                 
-                # Ejecutar en thread separado para no bloquear
                 loop = asyncio.get_event_loop()
                 audio = await asyncio.wait_for(
                     loop.run_in_executor(
@@ -48,34 +71,36 @@ class VoiceSynthesizer:
                             model="eleven_turbo_v2_5"
                         )
                     ),
-                    timeout=4.5  # Timeout optimizado para velocidad
+                    timeout=self.TIMEOUT
                 )
                 
-                # Convertir a bytes
                 audio_bytes = audio if isinstance(audio, bytes) else b''.join(audio)
                 
-                # Validar que el audio no esté vacío
-                if not audio_bytes or len(audio_bytes) < 1000:
-                    raise Exception(f"Audio muy pequeño: {len(audio_bytes) if audio_bytes else 0} bytes")
+                if not audio_bytes or len(audio_bytes) < self.MIN_AUDIO_SIZE:
+                    raise Exception(f"Audio pequeño: {len(audio_bytes)} bytes")
                 
-                # Guardar archivo solo si se especifica
                 if filename:
-                    filepath = os.path.join(self.audio_dir, filename)
-                    with open(filepath, 'wb') as f:
-                        f.write(audio_bytes)
+                    self._save_audio(audio_bytes, filename)
                 
-                logger.info(f"✅ Audio generado: {len(audio_bytes)} bytes en {attempt + 1} intento(s)")
+                logger.info(f"✅ Audio: {len(audio_bytes)} bytes")
                 return audio_bytes
                 
             except asyncio.TimeoutError:
-                logger.error(f"⏱️ Timeout en intento {attempt + 1}/3")
-                if attempt < 2:
-                    await asyncio.sleep(0.1)
+                logger.error(f"⏱️ Timeout {attempt + 1}/{self.MAX_RETRIES}")
+                if attempt < self.MAX_RETRIES - 1:
+                    await asyncio.sleep(self.RETRY_DELAY)
                     continue
-                raise Exception("ElevenLabs timeout después de 3 intentos")
+                raise Exception("Timeout después de reintentos")
+                
             except Exception as e:
-                logger.error(f"❌ Error en intento {attempt + 1}/3: {e}")
-                if attempt < 2:
-                    await asyncio.sleep(0.1)
+                logger.error(f"❌ Error {attempt + 1}/{self.MAX_RETRIES}: {e}")
+                if attempt < self.MAX_RETRIES - 1:
+                    await asyncio.sleep(self.RETRY_DELAY)
                     continue
                 raise
+    
+    def _save_audio(self, audio_bytes: bytes, filename: str) -> None:
+        """Guardar audio en archivo"""
+        filepath = os.path.join(self.audio_dir, filename)
+        with open(filepath, 'wb') as f:
+            f.write(audio_bytes)
