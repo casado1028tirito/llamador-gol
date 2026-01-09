@@ -1,6 +1,11 @@
+"""
+Punto de entrada principal del sistema
+Orquesta todos los componentes del llamador telefónico
+"""
 import asyncio
 import os
 import threading
+import signal
 from loguru import logger
 from telegram_bot import TelegramBot
 from voip_manager import VoIPManager
@@ -10,92 +15,88 @@ from config import settings
 import uvicorn
 from webhook_server import app, set_caller_bot
 
-# Crear directorio de logs si no existe
-os.makedirs("logs", exist_ok=True)
 
+# Configurar logs
+os.makedirs("logs", exist_ok=True)
 logger.add("logs/app_{time}.log", rotation="1 day", retention="7 days")
 
 
 class CallerBot:
+    """
+    Orquestador principal del sistema
+    Patrón: Facade - Simplifica interacción con subsistemas
+    """
+    
     def __init__(self):
+        """Inicializar componentes"""
         self.telegram_bot = TelegramBot(self)
         self.voip_manager = VoIPManager(self)
         self.voice_synthesizer = VoiceSynthesizer()
         self.ai_conversation = AIConversation()
-        self.webhook_server = None
-        
-    async def start(self):
+        self.webhook_server: Optional[threading.Thread] = None
+    
+    async def start(self) -> None:
         """Iniciar todos los servicios"""
-        logger.info("🚀 Iniciando Software Llamador...")
+        logger.info("🚀 Iniciando sistema...")
         
         try:
             # Inicializar componentes
             await self.voice_synthesizer.initialize()
             await self.voip_manager.initialize()
             
-            # Configurar referencia del bot en el webhook server
+            # Configurar webhook server
             set_caller_bot(self)
             
-            # Iniciar servidor webhook en un thread separado
-            logger.info("🌐 Iniciando servidor webhook en puerto 8000...")
+            # Iniciar webhook en thread separado
+            logger.info("🌐 Iniciando webhook...")
             self.webhook_server = threading.Thread(
-                target=self._run_webhook_server,
+                target=self._run_webhook,
                 daemon=True
             )
             self.webhook_server.start()
             
-            # Dar tiempo al servidor para iniciar
-            await asyncio.sleep(2)
-            logger.info("✅ Servidor webhook iniciado")
+            await asyncio.sleep(2)  # Esperar inicio
+            logger.info("✅ Webhook listo")
             
-            # Iniciar bot de Telegram
-            logger.info("📱 Iniciando bot de Telegram...")
+            # Iniciar Telegram bot
+            logger.info("📱 Iniciando Telegram...")
             await self.telegram_bot.start()
             
         except Exception as e:
-            logger.error(f"❌ Error al iniciar: {e}")
+            logger.error(f"❌ Error iniciando: {e}")
             raise
     
-    def _run_webhook_server(self):
-        """Ejecutar servidor webhook en thread separado"""
+    def _run_webhook(self) -> None:
+        """Ejecutar servidor webhook"""
         port = settings.webhook_port
-        logger.info(f"🌐 Servidor usando puerto: {port} (Railway asigna PORT dinámicamente)")
-        uvicorn.run(
-            app,
-            host="0.0.0.0",
-            port=port,
-            log_level="info"
-        )
+        logger.info(f"🌐 Puerto: {port}")
+        uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
     
-    async def stop(self):
-        """Detener todos los servicios"""
-        logger.info("🛑 Deteniendo servicios...")
+    async def stop(self) -> None:
+        """Detener servicios"""
+        logger.info("🛑 Deteniendo...")
         await self.telegram_bot.stop()
         await self.voip_manager.cleanup()
-        logger.info("✅ Servicios detenidos correctamente")
+        logger.info("✅ Sistema detenido")
 
 
 async def main():
-    """Inicializar y ejecutar el bot con validaciones completas"""
-    logger.info("🚀 INICIANDO SISTEMA COMPLETO...")
-    logger.info(f"📍 Webhook URL: {settings.webhook_url}")
-    logger.info(f"🎙️ Voice ID: {settings.voice_bot}")
+    """Punto de entrada principal"""
+    logger.info("🚀 INICIANDO...")
+    logger.info(f"📍 Webhook: {settings.webhook_url}")
+    logger.info(f"🎙️ Voz: {settings.voice_bot}")
     
     bot = CallerBot()
+    
     try:
-        logger.info("🔧 Iniciando componentes...")
         await bot.start()
+        logger.info("✅ SISTEMA ACTIVO")
         
-        # Mantener el bot corriendo
-        logger.info("✅ SISTEMA ACTIVO Y LISTO. Presiona Ctrl+C para detener.")
-        logger.info("📞 Esperando llamadas entrantes...")
-        
-        # Esperar indefinidamente
-        import signal
+        # Configurar señales
         stop_event = asyncio.Event()
         
         def signal_handler(signum, frame):
-            logger.info("⚠️ Señal de interrupción recibida")
+            logger.info("⚠️ Señal recibida")
             stop_event.set()
         
         signal.signal(signal.SIGINT, signal_handler)
@@ -104,7 +105,7 @@ async def main():
         await stop_event.wait()
         
     except KeyboardInterrupt:
-        logger.info("⚠️ Interrupción manual detectada")
+        logger.info("⚠️ Interrupción manual")
     except Exception as e:
         logger.error(f"❌ Error fatal: {e}")
     finally:
